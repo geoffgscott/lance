@@ -2168,6 +2168,30 @@ def test_optimize_index_recall(tmp_path: Path):
     check_index(has_knn_combined=False, delete_has_happened=True)
 
 
+@pytest.mark.parametrize(
+    "index_type, params",
+    [
+        ("IVF_FLAT", {}),
+        ("IVF_PQ", {"num_sub_vectors": 4}),
+        ("IVF_RQ", {}),
+    ],
+)
+def test_optimize_indices_keeps_num_partitions(tmp_path: Path, index_type, params):
+    # 500 rows per partition is below a quarter of every IVF type's default
+    # target partition size, so a join pass that falls back to that default
+    # merges all of them. An index built with num_partitions should keep the
+    # partitioning it was built with when there is nothing new to index.
+    vectors = np.random.default_rng(0).standard_normal((10_000, 16)).astype(np.float32)
+    ds = lance.write_dataset(vec_to_table(vectors), tmp_path / "ds")
+    ds = ds.create_index("vector", index_type=index_type, num_partitions=20, **params)
+    assert ds.stats.index_stats("vector_idx")["indices"][0]["num_partitions"] == 20
+
+    ds.optimize.optimize_indices()
+
+    ds = lance.dataset(tmp_path / "ds")
+    assert ds.stats.index_stats("vector_idx")["indices"][0]["num_partitions"] == 20
+
+
 def test_knn_with_deletions(tmp_path):
     dims = 5
     values = pa.array(
